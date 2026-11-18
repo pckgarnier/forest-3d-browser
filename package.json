@@ -1,0 +1,15 @@
+{
+  "name": "forest-3d-browser",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Procedural WebGPU enchanted forest you can fly through, shipped as a single index.html",
+  "type": "commonjs",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "perf": "node tools/perf.mjs index.html",
+    "shots": "node tools/shoot.mjs out/shots out/debug.html 0,1,2,3,4,5 14"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.5"
+  }
+}
