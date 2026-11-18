@@ -459,9 +459,17 @@ async function main() {
   const FLYT = 60, tmp = new Float32Array(9), TEMPLE_Y = W.gh(W.TEMPLE[0], W.TEMPLE[2]);
 
   // input
-  const keys = new Uint8Array(8); // w a s d q e shift
-  const KM = { KeyW: 0, KeyA: 1, KeyS: 2, KeyD: 3, KeyQ: 4, KeyE: 5, ShiftLeft: 6, ShiftRight: 6, ArrowUp: 0, ArrowLeft: 1, ArrowDown: 2, ArrowRight: 3 };
-  addEventListener('keydown', e => { const k = KM[e.code]; if (k !== undefined) { keys[k] = 1; e.preventDefault(); } });
+  const keys = new Uint8Array(8); // w a s d c(down) e(up) shift
+  const KM = { KeyW: 0, KeyA: 1, KeyS: 2, KeyD: 3, KeyC: 4, KeyE: 5, ShiftLeft: 6, ShiftRight: 6, ArrowUp: 0, ArrowLeft: 1, ArrowDown: 2, ArrowRight: 3 };
+  // interactive camera modes: 0 free, 1 autopilot (Q), 2 fading to a showcase viewpoint (1-6)
+  const IM = new Float64Array(12); // [mode, autoT, blendT, fadeT, targetPose, from x,y,z,yaw,pitch]
+  addEventListener('keydown', e => {
+    if (FLY || POSE >= 0 || MANUAL) return;
+    if (e.code === 'KeyQ' && !e.repeat) { e.preventDefault(); if (IM[0] === 1) IM[0] = 0; else startAuto(); return; }
+    const dg = e.code.startsWith('Digit') ? +e.code.slice(5) : e.code.startsWith('Numpad') ? +e.code.slice(6) : 0;
+    if (dg >= 1 && dg <= 6 && !e.repeat) { e.preventDefault(); IM[0] = 2; IM[3] = 0; IM[4] = dg - 1; return; }
+    const k = KM[e.code]; if (k !== undefined) { keys[k] = 1; e.preventDefault(); if (k !== 6 && IM[0] === 1) IM[0] = 0; }
+  });
   addEventListener('keyup', e => { const k = KM[e.code]; if (k !== undefined) keys[k] = 0; });
   addEventListener('blur', () => keys.fill(0));
   cv.addEventListener('click', () => { if (!FLY && POSE < 0) cv.requestPointerLock(); });
@@ -491,8 +499,41 @@ async function main() {
   }
   const visible = (i, pl) => { const x = dS[i * 4], y = dS[i * 4 + 1], z = dS[i * 4 + 2], r = dS[i * 4 + 3]; for (let p = 0; p < 4; p++) if (pl[p * 4] * x + pl[p * 4 + 1] * y + pl[p * 4 + 2] * z + pl[p * 4 + 3] < -r) return false; return true; };
 
+  function startAuto() { // join the fly-through path at the point nearest the camera
+    let best = 1e18, bi = 0;
+    for (let s = 0; s <= NS; s += 2) { const dx = path[s * 3] - cam[0], dy = path[s * 3 + 1] - cam[1], dz = path[s * 3 + 2] - cam[2], e = dx * dx + dy * dy + dz * dz; if (e < best) { best = e; bi = s; } }
+    IM[0] = 1; IM[1] = arc[bi] / arc[NS] * FLYT; IM[2] = 0;
+    for (let k = 0; k < 5; k++) IM[5 + k] = cam[k];
+  }
+  const wrapA = a => a - Math.round(a / TAU) * TAU;
   function update(t, dt) {
-    if (FLY) {
+    if (!FLY && POSE < 0 && IM[0] === 1) { // autopilot: follow the scripted path, blending in from where the user was
+      IM[1] += dt; IM[2] += dt;
+      flyAt(IM[1]);
+      const b = smooth(0, 1.8, IM[2]);
+      if (b < 1) {
+        cam[0] = IM[5] + (cam[0] - IM[5]) * b; cam[1] = IM[6] + (cam[1] - IM[6]) * b; cam[2] = IM[7] + (cam[2] - IM[7]) * b;
+        cam[3] = IM[8] + wrapA(cam[3] - IM[8]) * b; cam[4] = IM[9] + (cam[4] - IM[9]) * b;
+      }
+      return;
+    }
+    if (!FLY && POSE < 0 && IM[0] === 2) { // showcase viewpoint: fade out, cut, fade in
+      const prev = IM[3]; IM[3] += dt;
+      if (prev < 0.35 && IM[3] >= 0.35) { const p = POSES[IM[4]]; cam[0] = p[0]; cam[2] = p[2]; cam[1] = W.gh(p[0], p[2]) + p[1]; cam[3] = p[3]; cam[4] = p[4]; }
+      if (IM[3] >= 0.8) IM[0] = 0;
+      return;
+    }
+    if (FLY) flyAt(t);
+    else if (POSE < 0) {
+      const sp = (keys[6] ? 30 : 7) * dt, cy = Math.cos(cam[3]), sy = Math.sin(cam[3]), cp = Math.cos(cam[4]), spp = Math.sin(cam[4]);
+      const f = keys[0] - keys[2], s = keys[3] - keys[1], v = keys[5] - keys[4];
+      cam[0] += (-sy * cp * f + cy * s) * sp; cam[2] += (-cy * cp * f - sy * s) * sp; cam[1] += (spp * f + v) * sp;
+      const r = Math.sqrt(cam[0] * cam[0] + cam[2] * cam[2] * 1.21); if (r > 205) { cam[0] *= 205 / r; cam[2] *= 205 / r; }
+      cam[1] = clamp(cam[1], W.gh(cam[0], cam[2]) + 0.6, 150);
+    }
+  }
+  function flyAt(t) {
+    {
       const L = arc[NS], d = ((t + FLYOFF) / FLYT) * L;
       pathAt(d, tmp, 0); pathAt(d + 7, tmp, 3); pathAt(d + 14, tmp, 6);
       cam[0] = tmp[0]; cam[1] = tmp[1]; cam[2] = tmp[2];
@@ -502,12 +543,6 @@ async function main() {
       if (bw > 0) { const ll = Math.sqrt(lx * lx + ly * ly + lz * lz) || 1, tx = W.TEMPLE[0] - cam[0], ty = TEMPLE_Y + 4 - cam[1], tz = W.TEMPLE[2] - cam[2], tl = Math.sqrt(tx * tx + ty * ty + tz * tz) || 1;
         lx = lx / ll * (1 - bw) + tx / tl * bw; ly = ly / ll * (1 - bw) + ty / tl * bw; lz = lz / ll * (1 - bw) + tz / tl * bw; }
       cam[3] = Math.atan2(-lx, -lz); cam[4] = Math.atan2(ly, Math.sqrt(lx * lx + lz * lz)) * 0.7 + 0.04;
-    } else if (POSE < 0) {
-      const sp = (keys[6] ? 30 : 7) * dt, cy = Math.cos(cam[3]), sy = Math.sin(cam[3]), cp = Math.cos(cam[4]), spp = Math.sin(cam[4]);
-      const f = keys[0] - keys[2], s = keys[3] - keys[1], v = keys[5] - keys[4];
-      cam[0] += (-sy * cp * f + cy * s) * sp; cam[2] += (-cy * cp * f - sy * s) * sp; cam[1] += (spp * f + v) * sp;
-      const r = Math.sqrt(cam[0] * cam[0] + cam[2] * cam[2] * 1.21); if (r > 205) { cam[0] *= 205 / r; cam[2] *= 205 / r; }
-      cam[1] = clamp(cam[1], W.gh(cam[0], cam[2]) + 0.6, 150);
     }
   }
 
@@ -556,7 +591,7 @@ async function main() {
       CUF[o + 16] = cam[0]; CUF[o + 17] = cam[1]; CUF[o + 18] = cam[2];
     }
     Q_.writeBuffer(cullU, 0, CUA); Q_.writeBuffer(indB, 0, IND);
-    PPF[0] = 1.15; PPF[1] = (frameN % 64) * 0.731; Q_.writeBuffer(ppU, 0, PPF);
+    PPF[0] = 1.15 * (IM[0] === 2 ? smooth(0, 0.35, Math.abs(IM[3] - 0.35)) : 1); PPF[1] = (frameN % 64) * 0.731; Q_.writeBuffer(ppU, 0, PPF);
     if (TS) { TSU[0] = perfStart >= 0 && !perfDone && perfFrame > 0 ? perfFrame - 1 : MAXF + 1; TSU[1] = MAXF; Q_.writeBuffer(tsU, 0, TSU); }
 
     const e = dev.createCommandEncoder();

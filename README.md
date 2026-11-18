@@ -15,8 +15,10 @@ any static server. Generating the world takes a few seconds on load.
 | Click | Capture the mouse (pointer lock) |
 | Mouse | Look around |
 | W A S D | Move |
-| Q / E | Down / up |
+| E / C | Up / down |
 | Shift | Move faster |
+| Q | Toggle autopilot: the camera joins the scripted tour path at the nearest point and follows it (movement keys or Q again hand control back) |
+| 1 – 6 | Jump to a showcase viewpoint: start view, canopy, stag, floating-rock glade, temple, root-arch giant |
 | Esc | Release the mouse |
 
 URL options:
